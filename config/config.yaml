@@ -1,0 +1,24 @@
+# Full training profile — 200k transactions, production-shaped paths.
+profile: train
+
+gcp:
+  project_id: aml-mlops-demo-498203
+  region: us-central1
+
+storage:
+  bucket: aml-mlops-nakul
+  raw_prefix: transactions/raw
+  output_filename: transactions.csv
+
+bigquery:
+  dataset: aml_mlops
+  raw_table: raw_transactions
+  staging_table: raw_transactions_staging
+  location: US
+
+data_generation:
+  n_transactions: 200000
+  fraud_rate: 0.02
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+  random_seed: 42

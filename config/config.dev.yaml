@@ -1,0 +1,24 @@
+# Fast iteration profile — smaller volume, isolated GCS prefix and BQ tables.
+profile: dev
+
+gcp:
+  project_id: aml-mlops-demo-498203
+  region: us-central1
+
+storage:
+  bucket: aml-mlops-nakul
+  raw_prefix: transactions/dev
+  output_filename: transactions_dev.csv
+
+bigquery:
+  dataset: aml_mlops
+  raw_table: raw_transactions_dev
+  staging_table: raw_transactions_dev_staging
+  location: US
+
+data_generation:
+  n_transactions: 25000
+  fraud_rate: 0.02
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+  random_seed: 42
