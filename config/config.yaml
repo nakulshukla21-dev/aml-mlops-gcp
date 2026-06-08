@@ -14,7 +14,19 @@ bigquery:
   dataset: aml_mlops
   raw_table: raw_transactions
   staging_table: raw_transactions_staging
+  features_base_view: features_base
+  features_velocity_view: features_velocity
+  features_network_view: features_network
+  features_view: features_training
+  features_eval_view: features_eval
+  features_train_view: features_train
+  features_val_view: features_val
+  features_test_view: features_test
   location: US
+
+splits:
+  train_end: "2024-09-30"   # train: Jan 1 – Sep 30
+  val_end: "2024-10-31"     # val: Oct; test: Nov – Dec
 
 data_generation:
   n_transactions: 200000
@@ -22,3 +34,16 @@ data_generation:
   start_date: "2024-01-01"
   end_date: "2024-12-31"
   random_seed: 42
+
+# Post-generation noise — applied after clean typology generation.
+noise:
+  enabled: true
+  label_flip_rate: 0.008          # ~0.8% imperfect labels
+  missing_optional_field_rate: 0.04
+  dirty_enum_rate: 0.03           # WIRE vs wire, USA vs US
+  memo_truncate_rate: 0.05
+  timestamp_jitter_rate: 0.03
+  timestamp_jitter_max_hours: 48
+  amount_jitter_rate: 0.02
+  external_receiver_metadata_rate: 0.80  # null receiver age/shell for external txs
+  merchant_name_typo_rate: 0.04

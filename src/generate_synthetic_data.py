@@ -23,18 +23,21 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.apply_noise import NoiseConfig, TransactionNoiseApplicator, print_noise_stats
 from src.config import (
     PROJECT_ROOT,
     add_config_arguments,
     default_data_path,
     load_config_from_args,
 )
-from src.geo_data import COUNTRY_CURRENCY, FX_TO_USD, GEO_REGIONS
-from src.merchant_data import (
+from src.reference_data import (
     CONFUSING_DBA_NAMES,
+    COUNTRY_CURRENCY,
     FRAUD_MEMOS,
+    FX_TO_USD,
     GENERIC_SHELL_NAMES,
     LEGIT_MEMOS,
+    MERCHANT_LOCATIONS,
     NAME_STEMS,
     NAME_SUFFIXES,
     VAGUE_MEMOS,
@@ -74,9 +77,6 @@ SWIFT_BICS = {
 class Account:
     account_id: str
     country: str
-    city: str
-    region: str
-    postal_code: str
     legal_name: str
     dba_name: str | None
     opened_at: datetime
@@ -107,11 +107,9 @@ class SyntheticAMLGenerator:
         weights = np.array([3 if c == "US" else 1 for c in COUNTRIES], dtype=float)
         return weights / weights.sum()
 
-    def _assign_geo(self, country: str) -> tuple[str, str, str]:
-        city, region, postal_prefix = self.rng.choice(GEO_REGIONS[country])
-        suffix = int(self.rng.integers(10, 99))
-        postal_code = f"{postal_prefix}{suffix}"
-        return city, region, postal_code
+    def _merchant_location(self, country: str) -> tuple[str, str]:
+        city, state = self.rng.choice(MERCHANT_LOCATIONS[country])
+        return str(city), str(state)
 
     def _format_legal_name(self, stem: str, suffix: str) -> str:
         style = str(self.rng.choice(["standard", "upper", "comma", "period"]))
@@ -154,15 +152,11 @@ class SyntheticAMLGenerator:
             opened_offset = int(self.rng.integers(0, max(span_days, 1)))
             opened_at = self.start_date + timedelta(days=opened_offset)
             is_shell = country in HIGH_RISK_COUNTRIES and self.rng.random() < 0.35
-            city, region, postal_code = self._assign_geo(country)
             legal_name, dba_name = self._assign_business_names(is_shell)
             account_id = f"ACC{country}{i:05d}"
             self.accounts[account_id] = Account(
                 account_id=account_id,
                 country=country,
-                city=city,
-                region=region,
-                postal_code=postal_code,
                 legal_name=legal_name,
                 dba_name=dba_name,
                 opened_at=opened_at,
@@ -206,15 +200,11 @@ class SyntheticAMLGenerator:
         return [self.accounts[i] for i in picked]
 
     def _new_shell_account(self, country: str, opened_at: datetime) -> Account:
-        city, region, postal_code = self._assign_geo(country)
         legal_name, dba_name = self._assign_business_names(is_shell=True)
         account_id = f"ACC{country}S{uuid.uuid4().hex[:6].upper()}"
         account = Account(
             account_id=account_id,
             country=country,
-            city=city,
-            region=region,
-            postal_code=postal_code,
             legal_name=legal_name,
             dba_name=dba_name,
             opened_at=opened_at,
@@ -303,7 +293,7 @@ class SyntheticAMLGenerator:
             if is_fraud and self.rng.random() < 0.25:
                 merchant_country = str(self.rng.choice(COUNTRIES))
 
-        merchant_city, merchant_state, _ = self._assign_geo(merchant_country)
+        merchant_city, merchant_state = self._merchant_location(merchant_country)
         terminal_id = None
         atm_id = None
 
@@ -732,6 +722,19 @@ def main() -> None:
         seed=gen_cfg.get("random_seed", 42),
     )
     df = generator.generate()
+
+    noise_cfg = NoiseConfig.from_dict(config.get("noise"))
+    noise_applicator = TransactionNoiseApplicator(
+        noise_cfg,
+        seed=gen_cfg.get("random_seed", 42) + 1,
+    )
+    df = noise_applicator.apply(df)
+    print_noise_stats(noise_applicator)
+
+    for col in ("sender_account_age_days", "receiver_account_age_days"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+
+    df = df.sort_values("timestamp").reset_index(drop=True)
     df = df[csv_column_order()]
 
     output.parent.mkdir(parents=True, exist_ok=True)

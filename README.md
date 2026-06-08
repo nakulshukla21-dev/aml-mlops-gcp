@@ -34,6 +34,8 @@ End-to-end AML transaction risk scoring pipeline on Google Cloud Platform. Desig
 
 `typology` is retained in the raw table for evaluation and debugging. **Exclude it from model training features** to avoid label leakage.
 
+Post-generation **noise** (missing fields, dirty enums, label noise, truncated memos) is configurable under `noise:` in config. Set `noise.enabled: false` for clean pipeline tests.
+
 ## Setup
 
 ```bash
@@ -42,6 +44,15 @@ python -m venv .venv
 pip install -r requirements.txt
 gcloud auth application-default login
 gcloud config set project aml-mlops-demo-498203
+```
+
+## Tests
+
+Unit tests (no GCP credentials required):
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
 ## Run Phase 1
@@ -84,7 +95,7 @@ config/
 data/            # Generated CSVs (gitignored)
 schemas/         # BigQuery table schema (JSON)
 sql/             # DDL and feature SQL (later phases)
-src/             # Python pipeline scripts
+src/             # Python pipeline scripts (reference_data.py = lookup tables)
 ```
 
 ## Design choices (demo, production-shaped)
@@ -106,10 +117,29 @@ src/             # Python pipeline scripts
 | Payment narrative | `payment_reference`, `memo` — invoice refs, wire notes, vague or misleading text |
 | Settlement | `transaction_currency`, `settlement_currency`, `settlement_amount`, `fx_rate`, `settlement_date`, `settlement_status`, `clearing_system`, `correspondent_bic` |
 
+## Phase 2 — Features & splits
+
+```bash
+# Deploy feature views and temporal splits (after raw data is loaded)
+python -m src.deploy_views --profile dev
+python -m src.deploy_views              # train profile
+```
+
+| View | Purpose |
+|------|---------|
+| `features_base` | Normalized attributes from raw (enums, settlement, POS, memo flags; includes account IDs for downstream joins) |
+| `features_velocity` | Derived from base — `txn_count_24h`, `txn_count_7d`, `total_amount_24h`, `unique_receivers_24h` |
+| `features_network` | Derived from base — `sender_fan_out_as_of`, `receiver_fan_in_as_of`, `both_high_risk` |
+| `features_training` | Combined training view (base + velocity + network + `is_fraud`) |
+| `features_eval` | Combined features + `typology` for evaluation only |
+| `features_train` / `_val` / `_test` | Temporal splits (Jan–Sep / Oct / Nov–Dec) |
+
+Dev profile uses `*_dev` view names so train and dev don't collide.
+
 ## Next iterations
 
-- [ ] BigQuery SQL feature engineering views
-- [ ] Temporal split views (train / val / test)
+- [x] BigQuery SQL feature engineering views
+- [x] Temporal split views (train / val / test)
 - [ ] Vertex AI AutoML training pipeline
 - [ ] Prediction logging table
 - [ ] Cloud Run inference API with matching feature logic

@@ -82,6 +82,20 @@ def sync_table_schema(
     return updated
 
 
+def recreate_table(
+    client: bigquery.Client,
+    table_id: str,
+    schema: list[bigquery.SchemaField],
+) -> bigquery.Table:
+    """Drop and recreate a table with the desired schema (for full reloads)."""
+    client.delete_table(table_id, not_found_ok=True)
+    table = bigquery.Table(table_id, schema=schema)
+    _apply_table_options(table)
+    created = client.create_table(table)
+    print(f"Recreated table: {table_id}")
+    return created
+
+
 def ensure_table(
     client: bigquery.Client,
     table_id: str,
@@ -295,7 +309,10 @@ def main() -> None:
     target_table_id = f"{gcp['project_id']}.{dataset_id}.{table_name}"
     staging_table_id = f"{gcp['project_id']}.{dataset_id}.{staging_table_name}"
 
-    ensure_table(client, target_table_id, table_schema)
+    if args.replace:
+        recreate_table(client, target_table_id, table_schema)
+    else:
+        ensure_table(client, target_table_id, table_schema)
     if not args.replace:
         ensure_staging_table(client, staging_table_id, csv_schema)
 

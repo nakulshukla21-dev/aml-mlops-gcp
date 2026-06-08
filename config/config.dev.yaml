@@ -14,7 +14,19 @@ bigquery:
   dataset: aml_mlops
   raw_table: raw_transactions_dev
   staging_table: raw_transactions_dev_staging
+  features_base_view: features_base_dev
+  features_velocity_view: features_velocity_dev
+  features_network_view: features_network_dev
+  features_view: features_training_dev
+  features_eval_view: features_eval_dev
+  features_train_view: features_train_dev
+  features_val_view: features_val_dev
+  features_test_view: features_test_dev
   location: US
+
+splits:
+  train_end: "2024-09-30"
+  val_end: "2024-10-31"
 
 data_generation:
   n_transactions: 25000
@@ -22,3 +34,15 @@ data_generation:
   start_date: "2024-01-01"
   end_date: "2024-12-31"
   random_seed: 42
+
+noise:
+  enabled: true
+  label_flip_rate: 0.008
+  missing_optional_field_rate: 0.04
+  dirty_enum_rate: 0.03
+  memo_truncate_rate: 0.05
+  timestamp_jitter_rate: 0.03
+  timestamp_jitter_max_hours: 48
+  amount_jitter_rate: 0.02
+  external_receiver_metadata_rate: 0.80
+  merchant_name_typo_rate: 0.04
