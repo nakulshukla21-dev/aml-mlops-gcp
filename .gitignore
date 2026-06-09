@@ -10,6 +10,9 @@ venv/
 data/*.csv
 data/*.parquet
 
+# AutoML run metadata (model IDs are environment-specific)
+artifacts/
+
 # Credentials
 *.json
 !schemas/*.json

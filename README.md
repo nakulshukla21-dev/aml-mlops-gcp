@@ -136,11 +136,39 @@ python -m src.deploy_views              # train profile
 
 Dev profile uses `*_dev` view names so train and dev don't collide.
 
+## Phase 3 — Vertex AI AutoML
+
+Prerequisites:
+
+1. Enable the [Vertex AI API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com?project=aml-mlops-demo-498203) on your GCP project (one-time).
+2. Ensure Phase 2 views are deployed (`python -m src.deploy_views`).
+
+```bash
+pip install -r requirements.txt
+python -m src.deploy_views              # includes features_automl input view
+python -m src.train_automl --profile dev   # fast iteration (~1 node hour)
+python -m src.evaluate_automl --profile dev
+
+# Full 200k training profile (longer, ~8 node hours)
+python -m src.train_automl
+python -m src.evaluate_automl
+```
+
+| Step | What it does |
+|------|----------------|
+| `features_automl` | Unions train/val/test splits with `ml_split` = `TRAIN` / `VALIDATE` / `TEST` |
+| `train_automl.py` | Creates TabularDataset from BigQuery, runs AutoML Tabular (target: `is_fraud`, objective: `maximize-au-prc`) |
+| `evaluate_automl.py` | Batch-predicts on `features_test`, reports precision/recall/F1 overall and by `typology` |
+
+Excluded from training (config `automl.excluded_columns`): `transaction_id`, `timestamp`, `txn_date`, `sender_account`, `receiver_account`, `ml_split`.
+
+Run metadata is saved locally to `artifacts/automl_<profile>.json` (gitignored).
+
 ## Next iterations
 
 - [x] BigQuery SQL feature engineering views
 - [x] Temporal split views (train / val / test)
-- [ ] Vertex AI AutoML training pipeline
+- [x] Vertex AI AutoML training pipeline
 - [ ] Prediction logging table
 - [ ] Cloud Run inference API with matching feature logic
 - [ ] Streamlit monitoring dashboard

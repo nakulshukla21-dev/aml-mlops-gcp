@@ -41,6 +41,7 @@ def test_template_variables_from_train_config():
     assert variables["raw_table"] == "raw_transactions"
     assert variables["features_base_view"] == "features_base"
     assert variables["features_view"] == "features_training"
+    assert variables["automl_input_view"] == "features_automl"
     assert variables["train_end"] == "2024-09-30"
 
 

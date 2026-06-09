@@ -19,6 +19,7 @@ VIEW_SCRIPTS = [
     SQL_DIR / "features" / "features_combined.sql",
     SQL_DIR / "features" / "features_eval.sql",
     SQL_DIR / "splits" / "temporal_splits.sql",
+    SQL_DIR / "training" / "automl_input.sql",
 ]
 
 
@@ -47,6 +48,7 @@ def template_variables(config: dict) -> dict[str, str]:
     gcp = config["gcp"]
     bq = config["bigquery"]
     splits = config.get("splits", {})
+    automl = config.get("automl", {})
     return {
         "project_id": gcp["project_id"],
         "dataset": bq["dataset"],
@@ -59,6 +61,7 @@ def template_variables(config: dict) -> dict[str, str]:
         "features_train_view": bq.get("features_train_view", "features_train"),
         "features_val_view": bq.get("features_val_view", "features_val"),
         "features_test_view": bq.get("features_test_view", "features_test"),
+        "automl_input_view": automl.get("automl_input_view", "features_automl"),
         "train_end": splits.get("train_end", "2024-09-30"),
         "val_end": splits.get("val_end", "2024-10-31"),
     }
