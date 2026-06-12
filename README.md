@@ -20,7 +20,7 @@ End-to-end AML transaction risk scoring pipeline on Google Cloud Platform. Desig
 
 | Step | Script |
 |------|--------|
-| Generate 200k synthetic transactions | `src/generate_synthetic_data.py` |
+| Generate transactions + dimension CSVs | `src/generate_synthetic_data.py` |
 | Upload CSV to GCS | `src/upload_to_gcs.py` |
 | Load into BigQuery | `src/load_to_bigquery.py` |
 
@@ -64,7 +64,7 @@ Uses isolated paths: `transactions_dev.csv`, `gs://.../transactions/dev/`, BQ ta
 ```bash
 python -m src.generate_synthetic_data --profile dev
 python -m src.upload_to_gcs --profile dev
-python -m src.load_to_bigquery --profile dev --replace
+python -m src.load_to_bigquery --profile dev --replace --load-dimensions
 ```
 
 ### Train profile (200k rows — default)
@@ -72,8 +72,11 @@ python -m src.load_to_bigquery --profile dev --replace
 ```bash
 python -m src.generate_synthetic_data
 python -m src.upload_to_gcs
-python -m src.load_to_bigquery --replace
+python -m src.load_to_bigquery --replace --load-dimensions
 ```
+
+Generation writes dimension CSVs to `data/dimensions/` (train) or `data/dimensions_dev/` (dev).  
+`--load-dimensions` loads reference + dimension tables from that directory into BigQuery.
 
 `--profile train` is optional (it's the default). Use `--config path/to/custom.yaml` to override both profiles.
 
@@ -164,11 +167,59 @@ Excluded from training (config `automl.excluded_columns`): `transaction_id`, `ti
 
 Run metadata is saved locally to `artifacts/automl_<profile>.json` (gitignored).
 
+## Phase 4 — Deploy to Vertex endpoint
+
+```bash
+python -m src.deploy_model
+python -m src.deploy_model --undeploy   # delete endpoint to stop serving charges
+```
+
+Deployment metadata is saved to `artifacts/deploy_<profile>.json`.
+
+After evaluation, metrics are written to `artifacts/metrics_<profile>.json` (overall + per-typology). Re-export anytime from an existing predictions table:
+
+```bash
+python -m src.export_metrics
+python -m src.export_metrics --profile dev
+```
+
+## Data architecture v2 (in progress)
+
+Bank **clients** and external **counterparties** are separate tables — cleaner features and model training.
+
+```
+ref_* tables
+     ↓
+dim_customer (bank clients, CIP/AML)  ←── beneficial_owner
+     ↓
+dim_account
+
+dim_counterparty (external parties)
+     ↓
+dim_counterparty_account
+
+raw_transactions_v2
+  sender_account_id  XOR sender_counterparty_account_id
+  receiver_account_id XOR receiver_counterparty_account_id
+```
+
+| Table | Holds |
+|-------|-------|
+| `dim_customer` | Bank clients only — CIP, onboarding, risk_rating, PEP |
+| `dim_counterparty` | Wire beneficiaries, merchants, shell entities — minimal fields |
+| `dim_account` | Client product accounts |
+| `dim_counterparty_account` | External account stubs for txn FKs |
+
+**Schemas:** `schemas/dim_*.json`, `raw_transactions_v2.json`, `ref_*.json`  
+**DDL:** `sql/dimensions/create_dimension_tables.sql`
+
 ## Next iterations
 
 - [x] BigQuery SQL feature engineering views
 - [x] Temporal split views (train / val / test)
 - [x] Vertex AI AutoML training pipeline
+- [x] Vertex AI endpoint deployment
+- [ ] Data arch v2 dimension tables + generator refactor
 - [ ] Prediction logging table
 - [ ] Cloud Run inference API with matching feature logic
 - [ ] Streamlit monitoring dashboard

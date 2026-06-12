@@ -1,0 +1,15 @@
+[
+  {"name": "account_id", "type": "STRING", "mode": "REQUIRED", "description": "Primary key; bank client accounts only"},
+  {"name": "customer_id", "type": "INTEGER", "mode": "REQUIRED", "description": "FK to dim_customer.customer_id"},
+  {"name": "product_code", "type": "STRING", "mode": "REQUIRED", "description": "FK to ref_product.product_code"},
+  {"name": "status", "type": "STRING", "mode": "REQUIRED", "description": "active, inactive, closed, frozen, dormant"},
+  {"name": "opened_date", "type": "DATE", "mode": "REQUIRED"},
+  {"name": "closed_date", "type": "DATE", "mode": "NULLABLE"},
+  {"name": "currency", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "current_balance", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "available_balance", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "is_primary", "type": "BOOLEAN", "mode": "NULLABLE"},
+  {"name": "domicile_country", "type": "STRING", "mode": "NULLABLE", "description": "FK to ref_country.country_code"},
+  {"name": "created_at", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "updated_at", "type": "TIMESTAMP", "mode": "NULLABLE"}
+]

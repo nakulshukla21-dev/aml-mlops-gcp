@@ -27,9 +27,6 @@ OPTIONAL_NULLABLE_COLUMNS = [
     "settlement_date",
     "clearing_system",
     "correspondent_bic",
-    "sender_account_age_days",
-    "receiver_account_age_days",
-    "receiver_is_shell_company",
 ]
 
 DIRTY_CHANNEL = {
@@ -126,7 +123,6 @@ class TransactionNoiseApplicator:
         stats: dict[str, int] = {}
 
         stats["label_flips"] = self._apply_label_noise(out)
-        stats["external_receiver_nulled"] = self._null_external_receiver_metadata(out)
         stats["missing_injections"] = self._inject_missing_values(out)
         stats["dirty_enums"] = self._dirty_enums(out)
         stats["memo_truncated"] = self._truncate_memos(out)
@@ -144,17 +140,6 @@ class TransactionNoiseApplicator:
         indices = self.rng.choice(len(df), n_flip, replace=False)
         df.loc[indices, "is_fraud"] = ~df.loc[indices, "is_fraud"].astype(bool)
         return n_flip
-
-    def _null_external_receiver_metadata(self, df: pd.DataFrame) -> int:
-        """Banks rarely know receiver age/shell status for external counterparties."""
-        cross_border = df["sender_country"] != df["receiver_country"]
-        mask = cross_border | (self.rng.random(len(df)) < 0.35)
-        apply_mask = mask & (self.rng.random(len(df)) < self.config.external_receiver_metadata_rate)
-        df.loc[apply_mask, "receiver_account_age_days"] = pd.NA
-        if "receiver_is_shell_company" in df.columns:
-            df["receiver_is_shell_company"] = df["receiver_is_shell_company"].astype(object)
-            df.loc[apply_mask, "receiver_is_shell_company"] = None
-        return int(apply_mask.sum())
 
     def _inject_missing_values(self, df: pd.DataFrame) -> int:
         count = 0
@@ -187,10 +172,11 @@ class TransactionNoiseApplicator:
                     self.rng, str(df.at[idx, "transaction_type"]), DIRTY_TRANSACTION_TYPE
                 )
             if _maybe(self.rng, 0.35):
-                for col in ("sender_country", "receiver_country"):
-                    df.at[idx, col] = _dirty_value(
-                        self.rng, str(df.at[idx, col]), DIRTY_COUNTRY
-                    )
+                for col in ("payment_sender_country", "payment_receiver_country"):
+                    if col in df.columns:
+                        df.at[idx, col] = _dirty_value(
+                            self.rng, str(df.at[idx, col]), DIRTY_COUNTRY
+                        )
             indicator = df.at[idx, "channel_indicator"]
             if pd.notna(indicator) and _maybe(self.rng, 0.3):
                 df.at[idx, "channel_indicator"] = _dirty_value(

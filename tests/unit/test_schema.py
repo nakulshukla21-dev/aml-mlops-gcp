@@ -13,7 +13,7 @@ from src.generate_synthetic_data import (
 )
 from src.load_to_bigquery import csv_load_schema, load_schema
 
-SCHEMA_PATH = PROJECT_ROOT / "schemas" / "raw_transactions.json"
+SCHEMA_PATH = PROJECT_ROOT / "schemas" / "raw_transactions_v2.json"
 
 
 def test_csv_column_order_matches_bq_csv_schema():
@@ -45,3 +45,19 @@ def test_generator_output_columns_match_schema():
     assert len(df) == 50
     assert "ingested_at" not in df.columns
     assert df["transaction_id"].is_unique
+
+
+def test_generator_account_xor_constraint():
+    generator = SyntheticAMLGenerator(
+        n_transactions=100,
+        fraud_rate=0.15,
+        start_date=datetime(2024, 1, 1),
+        end_date=datetime(2024, 12, 31),
+        seed=7,
+    )
+    df = generator.generate()
+
+    sender_ok = df["sender_account_id"].notna() ^ df["sender_counterparty_account_id"].notna()
+    receiver_ok = df["receiver_account_id"].notna() ^ df["receiver_counterparty_account_id"].notna()
+    assert sender_ok.all()
+    assert receiver_ok.all()

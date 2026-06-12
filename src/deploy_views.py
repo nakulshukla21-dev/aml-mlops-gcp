@@ -53,6 +53,12 @@ def template_variables(config: dict) -> dict[str, str]:
         "project_id": gcp["project_id"],
         "dataset": bq["dataset"],
         "raw_table": bq["raw_table"],
+        "dim_customer_table": bq.get("dim_customer_table", "dim_customer"),
+        "dim_counterparty_table": bq.get("dim_counterparty_table", "dim_counterparty"),
+        "dim_account_table": bq.get("dim_account_table", "dim_account"),
+        "dim_counterparty_account_table": bq.get(
+            "dim_counterparty_account_table", "dim_counterparty_account"
+        ),
         "features_base_view": bq.get("features_base_view", "features_base"),
         "features_velocity_view": bq.get("features_velocity_view", "features_velocity"),
         "features_network_view": bq.get("features_network_view", "features_network"),

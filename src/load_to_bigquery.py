@@ -12,11 +12,25 @@ from google.cloud import bigquery
 
 from src.config import PROJECT_ROOT, add_config_arguments, load_config_from_args
 
-SCHEMA_PATH = PROJECT_ROOT / "schemas" / "raw_transactions.json"
+SCHEMA_PATH = PROJECT_ROOT / "schemas" / "raw_transactions_v2.json"
+SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 
 # Columns populated after CSV load, not present in the source file.
 POST_LOAD_COLUMNS = frozenset({"ingested_at"})
 DEDUP_KEY = "transaction_id"
+
+
+DIMENSION_TABLES: dict[str, str] = {
+    "ref_country": "ref_country.json",
+    "ref_state": "ref_state.json",
+    "ref_naics": "ref_naics.json",
+    "ref_product": "ref_product.json",
+    "dim_customer": "dim_customer.json",
+    "dim_counterparty": "dim_counterparty.json",
+    "dim_account": "dim_account.json",
+    "dim_counterparty_account": "dim_counterparty_account.json",
+    "beneficial_owner": "beneficial_owner.json",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,6 +46,17 @@ def parse_args() -> argparse.Namespace:
         "--replace",
         action="store_true",
         help="Replace existing table contents (WRITE_TRUNCATE). Default appends with dedup.",
+    )
+    parser.add_argument(
+        "--dimensions-dir",
+        type=Path,
+        default=None,
+        help="Local directory with dimension CSVs. Defaults to data/<dimensions_dir> from config.",
+    )
+    parser.add_argument(
+        "--load-dimensions",
+        action="store_true",
+        help="Load dimension and reference tables from --dimensions-dir.",
     )
     return parser.parse_args()
 
@@ -61,7 +86,7 @@ def _apply_table_options(table: bigquery.Table) -> None:
         type_=bigquery.TimePartitioningType.DAY,
         field="timestamp",
     )
-    table.clustering_fields = ["sender_account", "receiver_account", "is_fraud"]
+    table.clustering_fields = ["sender_account_id", "receiver_account_id", "is_fraud"]
 
 
 def sync_table_schema(
@@ -162,6 +187,44 @@ def load_csv_from_gcs(
     return load_job
 
 
+def load_csv_from_file(
+    client: bigquery.Client,
+    table_id: str,
+    csv_path: Path,
+    schema: list[bigquery.SchemaField],
+    write_disposition: str,
+) -> bigquery.LoadJob:
+    job_config = build_load_job_config(schema, write_disposition)
+    with csv_path.open("rb") as handle:
+        load_job = client.load_table_from_file(handle, table_id, job_config=job_config)
+    load_job.result()
+    return load_job
+
+
+def ensure_simple_table(
+    client: bigquery.Client,
+    table_id: str,
+    schema: list[bigquery.SchemaField],
+) -> bigquery.Table:
+    table = bigquery.Table(table_id, schema=schema)
+    try:
+        return client.create_table(table)
+    except Conflict:
+        existing = client.get_table(table_id)
+        return sync_table_schema(client, existing, schema)
+
+
+def recreate_simple_table(
+    client: bigquery.Client,
+    table_id: str,
+    schema: list[bigquery.SchemaField],
+) -> bigquery.Table:
+    client.delete_table(table_id, not_found_ok=True)
+    created = client.create_table(bigquery.Table(table_id, schema=schema))
+    print(f"Recreated table: {table_id}")
+    return created
+
+
 def merge_staging_into_target(
     client: bigquery.Client,
     target_table_id: str,
@@ -252,6 +315,54 @@ def load_transactions(
     stamp_ingested_at(client, target_table_id)
 
 
+def dimensions_local_dir(config: dict, override: Path | None) -> Path:
+    if override is not None:
+        return override
+    rel = config.get("storage", {}).get("dimensions_dir", "dimensions")
+    return PROJECT_ROOT / "data" / rel
+
+
+def dimension_table_name(config: dict, logical_name: str) -> str:
+    bq_cfg = config["bigquery"]
+    return bq_cfg.get(f"{logical_name}_table", logical_name)
+
+
+def load_dimension_tables(
+    client: bigquery.Client,
+    config: dict,
+    dimensions_dir: Path,
+    *,
+    replace: bool,
+) -> None:
+    dataset_id = config["bigquery"]["dataset"]
+    project_id = config["gcp"]["project_id"]
+
+    for logical_name, schema_file in DIMENSION_TABLES.items():
+        csv_name = f"{logical_name}.csv"
+        csv_path = dimensions_dir / csv_name
+        if not csv_path.exists():
+            print(f"Skipping {logical_name}: {csv_path} not found")
+            continue
+
+        schema = load_schema(SCHEMAS_DIR / schema_file)
+        table_name = dimension_table_name(config, logical_name)
+        table_id = f"{project_id}.{dataset_id}.{table_name}"
+
+        if replace:
+            recreate_simple_table(client, table_id, schema)
+        else:
+            ensure_simple_table(client, table_id, schema)
+
+        load_job = load_csv_from_file(
+            client,
+            table_id,
+            csv_path,
+            schema,
+            bigquery.WriteDisposition.WRITE_TRUNCATE,
+        )
+        print(f"Loaded {load_job.output_rows:,} rows into {table_id} from {csv_path.name}")
+
+
 def print_table_stats(client: bigquery.Client, table_id: str) -> None:
     table = client.get_table(table_id)
     has_ingested_at = any(field.name == "ingested_at" for field in table.schema)
@@ -327,6 +438,11 @@ def main() -> None:
         replace=args.replace,
     )
     print_table_stats(client, target_table_id)
+
+    if args.load_dimensions:
+        dim_dir = dimensions_local_dir(config, args.dimensions_dir)
+        print(f"Loading dimensions from {dim_dir}")
+        load_dimension_tables(client, config, dim_dir, replace=args.replace)
 
 
 if __name__ == "__main__":

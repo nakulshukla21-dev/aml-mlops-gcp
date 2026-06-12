@@ -9,6 +9,8 @@ venv/
 # Generated data
 data/*.csv
 data/*.parquet
+data/dimensions/
+data/dimensions_dev/
 
 # AutoML run metadata (model IDs are environment-specific)
 artifacts/

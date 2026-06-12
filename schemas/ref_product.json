@@ -1,0 +1,6 @@
+[
+  {"name": "product_code", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "product_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "product_type", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "product_category", "type": "STRING", "mode": "REQUIRED"}
+]

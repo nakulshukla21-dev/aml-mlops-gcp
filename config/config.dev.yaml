@@ -9,9 +9,19 @@ storage:
   bucket: aml-mlops-nakul
   raw_prefix: transactions/dev
   output_filename: transactions_dev.csv
+  dimensions_dir: dimensions_dev
 
 bigquery:
   dataset: aml_mlops
+  dim_customer_table: dim_customer_dev
+  dim_counterparty_table: dim_counterparty_dev
+  dim_account_table: dim_account_dev
+  dim_counterparty_account_table: dim_counterparty_account_dev
+  beneficial_owner_table: beneficial_owner_dev
+  ref_country_table: ref_country
+  ref_state_table: ref_state
+  ref_naics_table: ref_naics
+  ref_product_table: ref_product
   raw_table: raw_transactions_dev
   staging_table: raw_transactions_dev_staging
   features_base_view: features_base_dev
@@ -63,4 +73,15 @@ automl:
     - txn_date
     - sender_account
     - receiver_account
+    - sender_account_id
+    - sender_counterparty_account_id
+    - receiver_account_id
+    - receiver_counterparty_account_id
     - ml_split
+
+deployment:
+  endpoint_display_name: aml-fraud-endpoint-dev
+  deployed_model_display_name: aml-fraud-scorer-dev
+  machine_type: n1-standard-2
+  min_replica_count: 1
+  max_replica_count: 1

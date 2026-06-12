@@ -100,6 +100,25 @@ def artifact_path(config: dict) -> Path:
     return ARTIFACTS_DIR / f"automl_{profile}.json"
 
 
+def eval_artifact_path(config: dict) -> Path:
+    profile = config.get("profile", "train")
+    return ARTIFACTS_DIR / f"eval_{profile}.json"
+
+
+def metrics_artifact_path(config: dict) -> Path:
+    profile = config.get("profile", "train")
+    return ARTIFACTS_DIR / f"metrics_{profile}.json"
+
+
+def deploy_artifact_path(config: dict) -> Path:
+    profile = config.get("profile", "train")
+    return ARTIFACTS_DIR / f"deploy_{profile}.json"
+
+
+def deployment_config(config: dict) -> dict:
+    return config.get("deployment", {})
+
+
 def save_run_artifact(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:

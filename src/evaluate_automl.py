@@ -8,17 +8,19 @@ from pathlib import Path
 from google.cloud import aiplatform, bigquery
 
 from src.automl_utils import (
-    ARTIFACTS_DIR,
     artifact_path,
     automl_config,
     bq_dataset_id,
     bq_dataset_uri,
     bq_source_uri,
     bq_table_id,
+    eval_artifact_path,
     load_run_artifact,
+    metrics_artifact_path,
     save_run_artifact,
 )
 from src.config import add_config_arguments, load_config_from_args
+from src.metrics import compute_metrics, print_metrics_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,90 +144,28 @@ def run_batch_predict(
     return output_table
 
 
-def print_metrics(client: bigquery.Client, predictions_table: str, config: dict) -> None:
-    automl = automl_config(config)
-    bq = config["bigquery"]
-    target_column = automl.get("target_column", "is_fraud")
-    eval_view = bq_table_id(config, bq["features_eval_view"])
-
+def evaluate_and_report(
+    client: bigquery.Client,
+    predictions_table: str,
+    config: dict,
+    model_resource_name: str,
+) -> dict:
     table = client.get_table(predictions_table)
+    target_column = automl_config(config).get("target_column", "is_fraud")
     predicted_col = prediction_column(table.schema, target_column)
     predicted_positive = predicted_positive_expr(table.schema, predicted_col, alias="p")
 
-    overall_query = f"""
-        SELECT
-          COUNT(*) AS n_rows,
-          COUNTIF(e.{target_column}) AS fraud_rows,
-          COUNTIF({predicted_positive}) AS predicted_fraud_rows,
-          COUNTIF(e.{target_column} AND {predicted_positive}) AS true_positives,
-          COUNTIF(NOT e.{target_column} AND NOT ({predicted_positive})) AS true_negatives,
-          COUNTIF(e.{target_column} AND NOT ({predicted_positive})) AS false_negatives,
-          COUNTIF(NOT e.{target_column} AND {predicted_positive}) AS false_positives
-        FROM `{predictions_table}` AS p
-        JOIN `{eval_view}` AS e
-          USING (transaction_id)
-    """
-    row = list(client.query(overall_query).result())[0]
-    precision = (
-        row.true_positives / (row.true_positives + row.false_positives)
-        if (row.true_positives + row.false_positives)
-        else 0.0
+    metrics = compute_metrics(
+        client,
+        predictions_table,
+        config,
+        predicted_col=predicted_col,
+        predicted_positive=predicted_positive,
     )
-    recall = (
-        row.true_positives / (row.true_positives + row.false_negatives)
-        if (row.true_positives + row.false_negatives)
-        else 0.0
-    )
-    f1 = (
-        2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    )
-
-    print("\nOverall test metrics:")
-    print(f"  Rows: {row.n_rows:,}")
-    print(f"  Precision: {precision:.4f}")
-    print(f"  Recall:    {recall:.4f}")
-    print(f"  F1:        {f1:.4f}")
-    print(
-        f"  Confusion: TP={row.true_positives:,} FP={row.false_positives:,} "
-        f"TN={row.true_negatives:,} FN={row.false_negatives:,}"
-    )
-
-    typology_query = f"""
-        SELECT
-          e.typology,
-          COUNT(*) AS n_rows,
-          COUNTIF(e.{target_column}) AS fraud_rows,
-          COUNTIF({predicted_positive}) AS predicted_fraud_rows,
-          COUNTIF(e.{target_column} AND {predicted_positive}) AS true_positives,
-          COUNTIF(e.{target_column} AND NOT ({predicted_positive})) AS false_negatives,
-          COUNTIF(NOT e.{target_column} AND {predicted_positive}) AS false_positives
-        FROM `{predictions_table}` AS p
-        JOIN `{eval_view}` AS e
-          USING (transaction_id)
-        GROUP BY e.typology
-        ORDER BY n_rows DESC
-    """
-    print("\nPer-typology test metrics:")
-    print(f"  {'typology':<18} {'n':>8} {'fraud':>8} {'prec':>8} {'recall':>8} {'f1':>8}")
-    for typology_row in client.query(typology_query).result():
-        tp = typology_row.true_positives
-        fp = typology_row.false_positives
-        fn = typology_row.false_negatives
-        typ_precision = tp / (tp + fp) if (tp + fp) else 0.0
-        typ_recall = tp / (tp + fn) if (tp + fn) else 0.0
-        typ_f1 = (
-            2 * typ_precision * typ_recall / (typ_precision + typ_recall)
-            if (typ_precision + typ_recall)
-            else 0.0
-        )
-        print(
-            f"  {typology_row.typology:<18} "
-            f"{typology_row.n_rows:>8,} "
-            f"{typology_row.fraud_rows:>8,} "
-            f"{typ_precision:>8.3f} "
-            f"{typ_recall:>8.3f} "
-            f"{typ_f1:>8.3f}"
-        )
+    metrics["model_resource_name"] = model_resource_name
+    print_metrics_report(metrics)
+    save_run_artifact(metrics_artifact_path(config), metrics)
+    return metrics
 
 
 def main() -> None:
@@ -247,11 +187,11 @@ def main() -> None:
     automl = automl_config(config)
     prefix = automl.get("predictions_table_prefix", "automl_predictions")
 
-    eval_artifact_path = ARTIFACTS_DIR / f"eval_{profile}.json"
+    eval_path = eval_artifact_path(config)
     if args.skip_batch_predict:
-        if eval_artifact_path.exists():
+        if eval_path.exists():
             predictions_table = normalize_predictions_table(
-                load_run_artifact(eval_artifact_path)["predictions_table"],
+                load_run_artifact(eval_path)["predictions_table"],
                 config,
             )
             print(f"Reusing predictions table: {predictions_table}")
@@ -268,7 +208,7 @@ def main() -> None:
         job_name = f"{automl.get('display_name_prefix', 'aml-fraud')}-eval-{profile}"
         predictions_table = run_batch_predict(model, config, job_name)
         save_run_artifact(
-            eval_artifact_path,
+            eval_path,
             {
                 "profile": profile,
                 "model_resource_name": model_name,
@@ -276,7 +216,7 @@ def main() -> None:
             },
         )
 
-    print_metrics(client, predictions_table, config)
+    evaluate_and_report(client, predictions_table, config, model_name)
 
 
 if __name__ == "__main__":

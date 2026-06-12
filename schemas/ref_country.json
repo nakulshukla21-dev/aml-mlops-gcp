@@ -1,0 +1,8 @@
+[
+  {"name": "country_code", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "country_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "iso_alpha3", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "risk_tier", "type": "STRING", "mode": "REQUIRED", "description": "low, medium, high"},
+  {"name": "is_fatf_grey", "type": "BOOLEAN", "mode": "NULLABLE"},
+  {"name": "default_currency", "type": "STRING", "mode": "REQUIRED"}
+]

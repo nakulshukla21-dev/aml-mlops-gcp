@@ -41,7 +41,7 @@ def test_recreate_table_drops_and_creates_with_partitioning():
     created_table = client.create_table.call_args[0][0]
     assert created_table.time_partitioning.field == "timestamp"
     assert created_table.clustering_fields == [
-        "sender_account",
-        "receiver_account",
+        "sender_account_id",
+        "receiver_account_id",
         "is_fraud",
     ]

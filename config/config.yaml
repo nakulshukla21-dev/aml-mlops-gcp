@@ -9,10 +9,21 @@ storage:
   bucket: aml-mlops-nakul
   raw_prefix: transactions/raw
   output_filename: transactions.csv
+  dimensions_dir: dimensions
 
 bigquery:
   dataset: aml_mlops
   raw_table: raw_transactions
+  # Data arch v2 — bank clients separate from counterparties
+  dim_customer_table: dim_customer
+  dim_counterparty_table: dim_counterparty
+  dim_account_table: dim_account
+  dim_counterparty_account_table: dim_counterparty_account
+  beneficial_owner_table: beneficial_owner
+  ref_country_table: ref_country
+  ref_state_table: ref_state
+  ref_naics_table: ref_naics
+  ref_product_table: ref_product
   staging_table: raw_transactions_staging
   features_base_view: features_base
   features_velocity_view: features_velocity
@@ -64,4 +75,15 @@ automl:
     - txn_date
     - sender_account
     - receiver_account
+    - sender_account_id
+    - sender_counterparty_account_id
+    - receiver_account_id
+    - receiver_counterparty_account_id
     - ml_split
+
+deployment:
+  endpoint_display_name: aml-fraud-endpoint
+  deployed_model_display_name: aml-fraud-scorer
+  machine_type: n1-standard-2
+  min_replica_count: 1
+  max_replica_count: 1

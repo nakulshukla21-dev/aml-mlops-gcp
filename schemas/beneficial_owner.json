@@ -1,0 +1,12 @@
+[
+  {"name": "beneficial_owner_id", "type": "INTEGER", "mode": "REQUIRED"},
+  {"name": "business_customer_id", "type": "INTEGER", "mode": "REQUIRED", "description": "FK to dim_customer where entity_type=business"},
+  {"name": "owner_customer_id", "type": "INTEGER", "mode": "NULLABLE", "description": "FK to dim_customer when owner is a bank client"},
+  {"name": "owner_counterparty_id", "type": "INTEGER", "mode": "NULLABLE", "description": "FK to dim_counterparty when owner is external"},
+  {"name": "owner_is_bank_client", "type": "BOOLEAN", "mode": "REQUIRED"},
+  {"name": "ownership_pct", "type": "FLOAT", "mode": "REQUIRED"},
+  {"name": "control_type", "type": "STRING", "mode": "REQUIRED", "description": "ownership, voting, other_control"},
+  {"name": "is_pep", "type": "BOOLEAN", "mode": "NULLABLE"},
+  {"name": "effective_from", "type": "DATE", "mode": "REQUIRED"},
+  {"name": "effective_to", "type": "DATE", "mode": "NULLABLE"}
+]

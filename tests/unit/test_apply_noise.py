@@ -41,20 +41,18 @@ def test_high_noise_rates_modify_data(sample_transactions, noise_applicator):
     assert result.loc[0, "channel"] != original_channel or result.loc[0, "memo"] != original_memo
 
 
-def test_external_receiver_metadata_nulled_for_cross_border(sample_transactions):
+def test_dirty_country_codes_applied_to_payment_countries(sample_transactions):
     config = NoiseConfig(
         enabled=True,
         label_flip_rate=0.0,
         missing_optional_field_rate=0.0,
-        dirty_enum_rate=0.0,
+        dirty_enum_rate=1.0,
         memo_truncate_rate=0.0,
         timestamp_jitter_rate=0.0,
         amount_jitter_rate=0.0,
-        external_receiver_metadata_rate=1.0,
     )
     applicator = TransactionNoiseApplicator(config, seed=42)
     result = applicator.apply(sample_transactions)
 
-    cross_border = result["sender_country"] != result["receiver_country"]
-    assert cross_border.any()
-    assert pd.isna(result.loc[cross_border.idxmax(), "receiver_account_age_days"])
+    assert applicator.stats["dirty_enums"] > 0
+    assert result.loc[0, "payment_sender_country"] in {"US", "USA", "us", "U.S."}

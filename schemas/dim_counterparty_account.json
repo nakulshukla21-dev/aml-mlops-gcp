@@ -1,0 +1,9 @@
+[
+  {"name": "counterparty_account_id", "type": "STRING", "mode": "REQUIRED", "description": "Primary key; referenced by transactions for external legs"},
+  {"name": "counterparty_id", "type": "INTEGER", "mode": "REQUIRED", "description": "FK to dim_counterparty.counterparty_id"},
+  {"name": "account_label", "type": "STRING", "mode": "NULLABLE", "description": "Masked or external account reference"},
+  {"name": "country", "type": "STRING", "mode": "NULLABLE", "description": "Account domicile if known"},
+  {"name": "first_seen_date", "type": "DATE", "mode": "NULLABLE"},
+  {"name": "created_at", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "updated_at", "type": "TIMESTAMP", "mode": "NULLABLE"}
+]

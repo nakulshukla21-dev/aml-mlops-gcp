@@ -1,0 +1,5 @@
+[
+  {"name": "country_code", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "state_code", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "state_name", "type": "STRING", "mode": "REQUIRED"}
+]

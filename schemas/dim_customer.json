@@ -1,0 +1,21 @@
+[
+  {"name": "customer_id", "type": "INTEGER", "mode": "REQUIRED", "description": "Surrogate numeric primary key; bank clients only"},
+  {"name": "entity_type", "type": "STRING", "mode": "REQUIRED", "description": "individual or business"},
+  {"name": "legal_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "dba_name", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "date_of_birth", "type": "DATE", "mode": "NULLABLE", "description": "Individuals only"},
+  {"name": "incorporation_date", "type": "DATE", "mode": "NULLABLE", "description": "Businesses only"},
+  {"name": "residence_country", "type": "STRING", "mode": "REQUIRED", "description": "FK to ref_country.country_code"},
+  {"name": "residence_state", "type": "STRING", "mode": "NULLABLE", "description": "FK to ref_state (country_code, state_code)"},
+  {"name": "citizenship_country", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "onboarding_date", "type": "DATE", "mode": "REQUIRED"},
+  {"name": "cip_status", "type": "STRING", "mode": "REQUIRED", "description": "complete, pending, edd"},
+  {"name": "risk_rating", "type": "STRING", "mode": "REQUIRED", "description": "low, medium, high"},
+  {"name": "is_pep", "type": "BOOLEAN", "mode": "NULLABLE"},
+  {"name": "is_sanctioned", "type": "BOOLEAN", "mode": "NULLABLE"},
+  {"name": "is_shell_entity", "type": "BOOLEAN", "mode": "NULLABLE", "description": "Business clients only; rare but possible"},
+  {"name": "naics_code", "type": "STRING", "mode": "NULLABLE", "description": "FK to ref_naics.naics_code"},
+  {"name": "last_review_date", "type": "DATE", "mode": "NULLABLE"},
+  {"name": "created_at", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "updated_at", "type": "TIMESTAMP", "mode": "NULLABLE"}
+]

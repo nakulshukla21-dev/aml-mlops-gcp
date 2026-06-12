@@ -1,0 +1,13 @@
+[
+  {"name": "counterparty_id", "type": "INTEGER", "mode": "REQUIRED", "description": "Surrogate numeric primary key; external parties only"},
+  {"name": "entity_type", "type": "STRING", "mode": "NULLABLE", "description": "individual, business, or unknown"},
+  {"name": "counterparty_role", "type": "STRING", "mode": "REQUIRED", "description": "wire_beneficiary, merchant, payer, shell_entity, other"},
+  {"name": "legal_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "dba_name", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "country", "type": "STRING", "mode": "NULLABLE", "description": "FK to ref_country.country_code; often known for wires"},
+  {"name": "is_shell_entity", "type": "BOOLEAN", "mode": "NULLABLE"},
+  {"name": "is_high_risk_jurisdiction", "type": "BOOLEAN", "mode": "NULLABLE", "description": "Derived at load or from ref_country"},
+  {"name": "first_seen_date", "type": "DATE", "mode": "NULLABLE", "description": "First observed in transaction history"},
+  {"name": "created_at", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "updated_at", "type": "TIMESTAMP", "mode": "NULLABLE"}
+]

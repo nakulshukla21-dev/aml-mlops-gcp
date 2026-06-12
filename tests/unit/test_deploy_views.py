@@ -39,6 +39,8 @@ def test_template_variables_from_train_config():
     assert variables["project_id"] == config["gcp"]["project_id"]
     assert variables["dataset"] == config["bigquery"]["dataset"]
     assert variables["raw_table"] == "raw_transactions"
+    assert variables["dim_customer_table"] == "dim_customer"
+    assert variables["dim_counterparty_table"] == "dim_counterparty"
     assert variables["features_base_view"] == "features_base"
     assert variables["features_view"] == "features_training"
     assert variables["automl_input_view"] == "features_automl"
