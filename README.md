@@ -4,8 +4,8 @@ End-to-end AML transaction risk scoring pipeline on Google Cloud Platform. Desig
 
 ## Architecture (target state)
 
-1. Python generates synthetic AML transactions → Cloud Storage
-2. BigQuery loads and engineers features (SQL)
+1. Python generates synthetic transactions + dimension tables → Cloud Storage / BigQuery
+2. BigQuery joins dimensions and engineers features (SQL)
 3. Vertex AI AutoML Tabular trains a binary classifier
 4. Model deployed to a Vertex AI endpoint
 5. Cloud Run API wraps inference
@@ -16,13 +16,46 @@ End-to-end AML transaction risk scoring pipeline on Google Cloud Platform. Desig
 **Bucket:** `gs://aml-mlops-nakul`  
 **Dataset:** `aml_mlops`
 
-## Phase 1 — Data ingest (this repo)
+## Data architecture v2
+
+Bank **clients** and external **counterparties** live in separate tables — cleaner features and model training.
+
+```
+ref_* tables
+     ↓
+dim_customer (bank clients, CIP/AML)  ←── beneficial_owner
+     ↓
+dim_account
+
+dim_counterparty (external parties)
+     ↓
+dim_counterparty_account
+
+raw_transactions (v2 schema)
+  sender_account_id  XOR sender_counterparty_account_id
+  receiver_account_id XOR receiver_counterparty_account_id
+```
+
+| Table | Holds |
+|-------|--------|
+| `dim_customer` | Bank clients only — CIP, onboarding, `risk_rating`, PEP |
+| `dim_counterparty` | Wire beneficiaries, merchants, shell entities — minimal fields |
+| `dim_account` | Client product accounts (`product_code` → `ref_product`) |
+| `dim_counterparty_account` | External account stubs referenced by transactions |
+| `beneficial_owner` | Business customer → owner (bank client or counterparty) |
+
+Account age, shell-company flags, and client risk attributes are **not** stored on raw transactions. `features_base` derives them via joins to the dimension tables.
+
+**Schemas:** `schemas/dim_*.json`, `raw_transactions_v2.json`, `ref_*.json`  
+**DDL:** `sql/dimensions/create_dimension_tables.sql`
+
+## Phase 1 — Data ingest
 
 | Step | Script |
 |------|--------|
 | Generate transactions + dimension CSVs | `src/generate_synthetic_data.py` |
-| Upload CSV to GCS | `src/upload_to_gcs.py` |
-| Load into BigQuery | `src/load_to_bigquery.py` |
+| Upload transaction CSV to GCS | `src/upload_to_gcs.py` |
+| Load transactions + dimensions into BigQuery | `src/load_to_bigquery.py` |
 
 ### Fraud typologies modeled
 
@@ -59,7 +92,7 @@ python -m pytest
 
 ### Dev profile (25k rows — fast iteration)
 
-Uses isolated paths: `transactions_dev.csv`, `gs://.../transactions/dev/`, BQ table `raw_transactions_dev`.
+Uses isolated paths: `transactions_dev.csv`, `gs://.../transactions/dev/`, BQ tables `raw_transactions_dev` and `dim_*_dev`.
 
 ```bash
 python -m src.generate_synthetic_data --profile dev
@@ -75,8 +108,11 @@ python -m src.upload_to_gcs
 python -m src.load_to_bigquery --replace --load-dimensions
 ```
 
-Generation writes dimension CSVs to `data/dimensions/` (train) or `data/dimensions_dev/` (dev).  
-`--load-dimensions` loads reference + dimension tables from that directory into BigQuery.
+Generation writes:
+- Transaction CSV → `data/transactions.csv` (or `data/transactions_dev.csv`)
+- Dimension CSVs → `data/dimensions/` (train) or `data/dimensions_dev/` (dev)
+
+`--load-dimensions` loads all reference and dimension tables from that directory into BigQuery (local file upload). Dimension tables must be loaded **before** deploying feature views.
 
 `--profile train` is optional (it's the default). Use `--config path/to/custom.yaml` to override both profiles.
 
@@ -95,10 +131,21 @@ Use `--dated-prefix` on upload for partition-style paths (`transactions/raw/dt=Y
 config/
   config.yaml      # train profile (200k)
   config.dev.yaml  # dev profile (25k, isolated tables)
-data/            # Generated CSVs (gitignored)
-schemas/         # BigQuery table schema (JSON)
-sql/             # DDL and feature SQL (later phases)
-src/             # Python pipeline scripts (reference_data.py = lookup tables)
+data/              # Generated CSVs (gitignored)
+  dimensions/      # ref_*, dim_*, beneficial_owner CSVs (train)
+  dimensions_dev/  # same, dev profile
+schemas/           # BigQuery table schemas (JSON)
+sql/
+  dimensions/      # Dimension DDL
+  features/        # Feature view SQL
+  splits/          # Temporal split views
+  training/        # AutoML input view
+src/
+  generate_synthetic_data.py  # transactions + dimension CSVs
+  dimension_data.py           # static ref_country, ref_product, etc.
+  reference_data.py           # merchant/geo lookup for generation
+  load_to_bigquery.py         # raw load + --load-dimensions
+  deploy_views.py             # deploy BQ views from sql/
 ```
 
 ## Design choices (demo, production-shaped)
@@ -107,32 +154,36 @@ src/             # Python pipeline scripts (reference_data.py = lookup tables)
 - **12-month timestamps** — supports temporal train/val/test splits
 - **Partitioned BQ table** on `DATE(timestamp)` — mirrors production ingest
 - **Config file** — no hardcoded project IDs in scripts
-- **Extra columns** — payment context (`channel_indicator`, `terminal_id`, `merchant_country`, `pos_entry_mode`), settlement fields, account ages, `typology`
+- **Separated parties** — bank clients (`dim_customer`) vs external counterparties (`dim_counterparty`); no `party_type` filtering in feature SQL
+- **Derived risk attributes** — account age, shell flags, client `risk_rating` / PEP joined in `features_base`, not duplicated on raw rows
+- **Payment context on txn** — channel/POS, merchant geo and names, settlement fields stay on the transaction row
 
-### Transaction fields (v0.2)
+### Raw transaction fields (v2)
 
 | Group | Fields |
 |-------|--------|
-| Payment rail | `channel` — settlement rail: `wire`, `ach`, `card`, `internal` |
-| Channel / POS | `channel_indicator` (`Online`, `In-Store`, `Mobile App`, `Phone`, `ATM`), `terminal_id`, `atm_id`, `pos_entry_mode` (`Chip/EMV`, `Contactless/Tap`, `Magstripe`, `Manually Keyed`) |
-| Merchant geo | `merchant_city`, `merchant_state`, `merchant_country` — store or HQ location (card/ATM txs) |
-| Merchant identity | `merchant_legal_name`, `merchant_dba_name` — counterparty or merchant business names |
-| Payment narrative | `payment_reference`, `memo` — invoice refs, wire notes, vague or misleading text |
+| Account legs | `sender_account_id` XOR `sender_counterparty_account_id`; `receiver_account_id` XOR `receiver_counterparty_account_id` |
+| Payment routing | `payment_sender_country`, `payment_receiver_country` — routing/settlement countries (not customer residence) |
+| Payment rail | `channel` — `wire`, `ach`, `card`, `internal` |
+| Channel / POS | `channel_indicator`, `terminal_id`, `atm_id`, `pos_entry_mode` |
+| Merchant (txn-level) | `merchant_city`, `merchant_state`, `merchant_country`, `merchant_legal_name`, `merchant_dba_name` |
+| Payment narrative | `payment_reference`, `memo` |
 | Settlement | `transaction_currency`, `settlement_currency`, `settlement_amount`, `fx_rate`, `settlement_date`, `settlement_status`, `clearing_system`, `correspondent_bic` |
+| Labels | `is_fraud` (training target), `typology` (evaluation only) |
 
 ## Phase 2 — Features & splits
 
 ```bash
-# Deploy feature views and temporal splits (after raw data is loaded)
+# Deploy feature views and temporal splits (after raw + dimension tables are loaded)
 python -m src.deploy_views --profile dev
 python -m src.deploy_views              # train profile
 ```
 
 | View | Purpose |
 |------|---------|
-| `features_base` | Normalized attributes from raw (enums, settlement, POS, memo flags; includes account IDs for downstream joins) |
-| `features_velocity` | Derived from base — `txn_count_24h`, `txn_count_7d`, `total_amount_24h`, `unique_receivers_24h` |
-| `features_network` | Derived from base — `sender_fan_out_as_of`, `receiver_fan_in_as_of`, `both_high_risk` |
+| `features_base` | Raw txn + dimension joins — normalized enums, settlement, POS/memo flags, derived account ages, shell flags, client risk attributes; unified `sender_account` / `receiver_account` for graph features |
+| `features_velocity` | Point-in-time sender velocity — `txn_count_24h`, `txn_count_7d`, `total_amount_24h`, `unique_receivers_24h` |
+| `features_network` | As-of fan-out/fan-in — `sender_fan_out_as_of`, `receiver_fan_in_as_of`, `both_high_risk` |
 | `features_training` | Combined training view (base + velocity + network + `is_fraud`) |
 | `features_eval` | Combined features + `typology` for evaluation only |
 | `features_train` / `_val` / `_test` | Temporal splits (Jan–Sep / Oct / Nov–Dec) |
@@ -144,7 +195,8 @@ Dev profile uses `*_dev` view names so train and dev don't collide.
 Prerequisites:
 
 1. Enable the [Vertex AI API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com?project=aml-mlops-demo-498203) on your GCP project (one-time).
-2. Ensure Phase 2 views are deployed (`python -m src.deploy_views`).
+2. Load raw transactions and dimensions (`python -m src.load_to_bigquery --replace --load-dimensions`).
+3. Deploy Phase 2 views (`python -m src.deploy_views`).
 
 ```bash
 pip install -r requirements.txt
@@ -163,7 +215,7 @@ python -m src.evaluate_automl
 | `train_automl.py` | Creates TabularDataset from BigQuery, runs AutoML Tabular (target: `is_fraud`, objective: `maximize-au-prc`) |
 | `evaluate_automl.py` | Batch-predicts on `features_test`, reports precision/recall/F1 overall and by `typology` |
 
-Excluded from training (config `automl.excluded_columns`): `transaction_id`, `timestamp`, `txn_date`, `sender_account`, `receiver_account`, `ml_split`.
+Excluded from training (config `automl.excluded_columns`): `transaction_id`, `timestamp`, `txn_date`, `sender_account`, `receiver_account`, `sender_account_id`, `sender_counterparty_account_id`, `receiver_account_id`, `receiver_counterparty_account_id`, `ml_split`.
 
 Run metadata is saved locally to `artifacts/automl_<profile>.json` (gitignored).
 
@@ -183,43 +235,14 @@ python -m src.export_metrics
 python -m src.export_metrics --profile dev
 ```
 
-## Data architecture v2 (in progress)
-
-Bank **clients** and external **counterparties** are separate tables — cleaner features and model training.
-
-```
-ref_* tables
-     ↓
-dim_customer (bank clients, CIP/AML)  ←── beneficial_owner
-     ↓
-dim_account
-
-dim_counterparty (external parties)
-     ↓
-dim_counterparty_account
-
-raw_transactions_v2
-  sender_account_id  XOR sender_counterparty_account_id
-  receiver_account_id XOR receiver_counterparty_account_id
-```
-
-| Table | Holds |
-|-------|-------|
-| `dim_customer` | Bank clients only — CIP, onboarding, risk_rating, PEP |
-| `dim_counterparty` | Wire beneficiaries, merchants, shell entities — minimal fields |
-| `dim_account` | Client product accounts |
-| `dim_counterparty_account` | External account stubs for txn FKs |
-
-**Schemas:** `schemas/dim_*.json`, `raw_transactions_v2.json`, `ref_*.json`  
-**DDL:** `sql/dimensions/create_dimension_tables.sql`
-
 ## Next iterations
 
 - [x] BigQuery SQL feature engineering views
 - [x] Temporal split views (train / val / test)
 - [x] Vertex AI AutoML training pipeline
 - [x] Vertex AI endpoint deployment
-- [ ] Data arch v2 dimension tables + generator refactor
+- [x] Data arch v2 — separated client/counterparty dimensions, v2 transactions, feature joins
+- [ ] Reload BQ data + redeploy views + retrain AutoML on v2 schema
 - [ ] Prediction logging table
 - [ ] Cloud Run inference API with matching feature logic
 - [ ] Streamlit monitoring dashboard
