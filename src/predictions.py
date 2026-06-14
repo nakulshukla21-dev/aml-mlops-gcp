@@ -75,3 +75,53 @@ def fraud_score_expr(
     raise ValueError(
         f"Unsupported prediction column type for {predicted_col}: {field.field_type}"
     )
+
+
+def _positive_class_index(classes: list) -> int:
+    normalized = [str(item).lower() for item in classes]
+    for label in ("true", "1", "yes"):
+        if label in normalized:
+            return normalized.index(label)
+    return max(range(len(classes)), key=lambda idx: float(idx))
+
+
+def parse_online_prediction(
+    prediction: dict,
+    *,
+    target_column: str = "is_fraud",
+    threshold: float = 0.5,
+) -> tuple[bool, float | None]:
+    """
+    Parse one Vertex online prediction dict into (predicted_positive, fraud_score).
+
+    Supports AutoML classification structs and boolean predictions.
+    """
+    predicted_key = f"predicted_{target_column}"
+    value = prediction.get(predicted_key)
+    if value is None:
+        predicted_keys = [key for key in prediction if key.startswith("predicted_")]
+        if len(predicted_keys) == 1:
+            value = prediction[predicted_keys[0]]
+        elif "classes" in prediction and "scores" in prediction:
+            value = prediction
+        else:
+            raise ValueError(f"Could not find prediction field in response: {prediction}")
+
+    if isinstance(value, bool):
+        score = 1.0 if value else 0.0
+        return value, score
+
+    if isinstance(value, dict):
+        classes = value.get("classes") or value.get("displayNames") or []
+        scores = value.get("scores") or []
+        if not classes or not scores:
+            raise ValueError(f"Prediction struct missing classes/scores: {value}")
+        idx = _positive_class_index(list(classes))
+        score = float(scores[idx])
+        return score >= threshold, score
+
+    if isinstance(value, (int, float)):
+        score = float(value)
+        return score >= threshold, score
+
+    raise ValueError(f"Unsupported online prediction payload: {value!r}")

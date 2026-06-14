@@ -6,6 +6,7 @@ from google.cloud import bigquery
 
 from src.predictions import (
     fraud_score_expr,
+    parse_online_prediction,
     prediction_column,
     predicted_positive_expr,
 )
@@ -51,3 +52,22 @@ def test_boolean_prediction_column_exprs():
     ]
     assert predicted_positive_expr(schema, "predicted_is_fraud", alias="p") == "p.predicted_is_fraud"
     assert fraud_score_expr(schema, "predicted_is_fraud", alias="p") == "IF(p.predicted_is_fraud, 1.0, 0.0)"
+
+
+def test_parse_online_prediction_struct():
+    prediction = {
+        "predicted_is_fraud": {
+            "classes": ["false", "true"],
+            "scores": [0.88, 0.12],
+        }
+    }
+    predicted, score = parse_online_prediction(prediction, threshold=0.5)
+    assert predicted is False
+    assert score == 0.12
+
+
+def test_parse_online_prediction_flat_classes_scores():
+    prediction = {"classes": ["false", "true"], "scores": [0.97, 0.03]}
+    predicted, score = parse_online_prediction(prediction, threshold=0.5)
+    assert predicted is False
+    assert score == 0.03

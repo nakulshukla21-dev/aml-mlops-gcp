@@ -1,5 +1,12 @@
 """Fetch a sample transaction_id from features_test_dev for parity checks."""
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from google.cloud import bigquery
 
 from src.config import DEV_CONFIG_PATH, load_config

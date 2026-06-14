@@ -146,6 +146,13 @@ src/
   reference_data.py           # merchant/geo lookup for generation
   load_to_bigquery.py         # raw load + --load-dimensions
   deploy_views.py             # deploy BQ views from sql/
+  refresh_automl_artifact.py  # sync automl artifact column_specs from BQ
+  serving/                    # FastAPI, vertex client, party resolver, feature SQL
+scripts/
+  smoke_serving.py            # end-to-end local API smoke test
+  high_score_test.py          # score a known fraud pattern via /score
+docs/
+  serving-spec.md             # Phase 2-lite API and architecture spec
 ```
 
 ## Design choices (demo, production-shaped)
@@ -214,11 +221,18 @@ python -m src.evaluate_automl
 | `features_automl` | Unions train/val/test splits with `ml_split` = `TRAIN` / `VALIDATE` / `TEST` |
 | `train_automl.py` | Creates TabularDataset from BigQuery, runs AutoML Tabular (target: `is_fraud`, objective: `maximize-au-prc`) |
 | `evaluate_automl.py` | Batch-predicts on `features_test`, reports precision/recall/F1 overall and by `typology` |
+| `refresh_automl_artifact.py` | Refresh `column_specs` in `artifacts/automl_<profile>.json` from the live BQ feature view |
 | `log_predictions.py` | Backfill `prediction_log` from an existing Vertex batch output table |
 
 Excluded from training (config `automl.excluded_columns`): `transaction_id`, `timestamp`, `txn_date`, `sender_account`, `receiver_account`, `sender_account_id`, `sender_counterparty_account_id`, `receiver_account_id`, `receiver_counterparty_account_id`, `ml_split`.
 
 Run metadata is saved locally to `artifacts/automl_<profile>.json` (gitignored).
+
+Refresh `column_specs` after redeploying feature views (without retraining):
+
+```bash
+python -m src.refresh_automl_artifact --profile dev
+```
 
 ### Prediction logging
 
@@ -261,7 +275,7 @@ python -m src.export_metrics
 python -m src.export_metrics --profile dev
 ```
 
-## Phase 5 — Cloud Run serving (Phase 2-lite)
+## Phase 5 — Online serving (Phase 2-lite)
 
 **Spec:** [`docs/serving-spec.md`](docs/serving-spec.md)
 
@@ -273,13 +287,46 @@ Prod-shaped online scoring: authenticated customer + payment instruction → par
 | `POST /validate` | **Dev parity only** — full raw v2 JSON with pre-resolved IDs; compare vs `features_training_dev` |
 | `GET /health` | Liveness |
 
-Build order: `party_resolver.py` + `sql/serving/score_features.sql` + parity tests, then FastAPI + Cloud Run.
+The model expects **40 feature columns** (including client/risk attributes from v2 dim joins). Refresh `artifacts/automl_<profile>.json` after feature view changes:
 
 ```bash
-# Parity check: online score_features.sql vs features_training_dev (requires BQ + ADC)
+python -m src.refresh_automl_artifact --profile dev
+```
+
+### Local API
+
+Requires ADC, BigQuery dimension tables, and a deployed Vertex endpoint (`artifacts/deploy_dev.json`).
+
+```bash
+pip install -r requirements-serving.txt
+python -m src.deploy_model --profile dev          # deploy endpoint (costs while running)
+python -m uvicorn src.serving.app:app --reload --port 8080
+```
+
+### Test scripts
+
+```bash
+# Feature parity: online SQL vs features_training_dev
 python -m src.serving.parity_check --profile dev --transaction-id <TXN_ID>
 python -m src.serving.parity_batch --profile dev --limit 10
+
+# End-to-end API smoke test (server must be running)
+python scripts/smoke_serving.py
+
+# High-risk fraud pattern (~99% score on known fraud txn)
+python scripts/high_score_test.py
+python scripts/high_score_test.py http://127.0.0.1:8080 TXN-89C98528B182
 ```
+
+### Stop endpoint charges
+
+Undeploy when not testing online scoring:
+
+```bash
+python -m src.deploy_model --profile dev --undeploy
+```
+
+Cloud Run packaging is ready (`Dockerfile`, `requirements-serving.txt`) — deploy later when needed.
 
 ## Next iterations
 
@@ -290,5 +337,6 @@ python -m src.serving.parity_batch --profile dev --limit 10
 - [x] Data arch v2 — separated client/counterparty dimensions, v2 transactions, feature joins
 - [x] Prediction logging table (`prediction_log`)
 - [x] Dev BQ reload + views + AutoML retrain on v2 (25k profile)
-- [ ] Phase 2-lite serving API — see `docs/serving-spec.md`
+- [x] Phase 2-lite serving API — FastAPI `/score`, `/validate`, `/health` (local + Dockerfile)
+- [ ] Deploy serving API to Cloud Run
 - [ ] Streamlit monitoring dashboard

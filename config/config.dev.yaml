@@ -86,3 +86,10 @@ deployment:
   machine_type: n1-standard-2
   min_replica_count: 1
   max_replica_count: 1
+
+serving:
+  prediction_threshold: 0.5
+  risk_thresholds:
+    high: 0.7
+    medium: 0.4
+  auth_mode: demo_trust_body

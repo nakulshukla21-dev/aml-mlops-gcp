@@ -178,3 +178,82 @@ def log_batch_predictions(
     inserted = int(job.num_dml_affected_rows or 0)
     print(f"Logged {inserted:,} predictions to {log_table_id}")
     return inserted
+
+
+def log_online_prediction(
+    client: bigquery.Client,
+    config: dict,
+    *,
+    transaction_id: str,
+    predicted_is_fraud: bool,
+    fraud_score: float | None,
+    model_resource_name: str,
+    endpoint_resource_name: str,
+    model_display_name: str | None = None,
+    feature_view: str = "serving/score_features",
+) -> None:
+    """Insert one online prediction row into prediction_log."""
+    ensure_prediction_log_table(client, config)
+    log_table_id = prediction_log_table_id(config)
+    profile = config.get("profile", "train")
+    scored_at = datetime.now(timezone.utc)
+    insert_sql = f"""
+        INSERT INTO `{log_table_id}` (
+          prediction_id,
+          transaction_id,
+          scored_at,
+          prediction_source,
+          model_resource_name,
+          model_display_name,
+          batch_job_display_name,
+          endpoint_resource_name,
+          profile,
+          feature_view,
+          predicted_is_fraud,
+          fraud_score,
+          actual_is_fraud,
+          raw_predictions_table,
+          logged_at
+        )
+        SELECT
+          GENERATE_UUID(),
+          @transaction_id,
+          @scored_at,
+          @prediction_source,
+          @model_resource_name,
+          @model_display_name,
+          @batch_job_display_name,
+          @endpoint_resource_name,
+          @profile,
+          @feature_view,
+          @predicted_is_fraud,
+          @fraud_score,
+          NULL,
+          NULL,
+          CURRENT_TIMESTAMP()
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("transaction_id", "STRING", transaction_id),
+            bigquery.ScalarQueryParameter("scored_at", "TIMESTAMP", scored_at),
+            bigquery.ScalarQueryParameter("prediction_source", "STRING", "online"),
+            bigquery.ScalarQueryParameter(
+                "model_resource_name", "STRING", model_resource_name
+            ),
+            bigquery.ScalarQueryParameter(
+                "model_display_name", "STRING", model_display_name
+            ),
+            bigquery.ScalarQueryParameter("batch_job_display_name", "STRING", None),
+            bigquery.ScalarQueryParameter(
+                "endpoint_resource_name", "STRING", endpoint_resource_name
+            ),
+            bigquery.ScalarQueryParameter("profile", "STRING", profile),
+            bigquery.ScalarQueryParameter("feature_view", "STRING", feature_view),
+            bigquery.ScalarQueryParameter(
+                "predicted_is_fraud", "BOOL", predicted_is_fraud
+            ),
+            bigquery.ScalarQueryParameter("fraud_score", "FLOAT64", fraud_score),
+        ]
+    )
+    client.query(insert_sql, job_config=job_config).result()
+    print(f"Logged online prediction for {transaction_id} to {log_table_id}")
