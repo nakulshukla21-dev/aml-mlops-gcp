@@ -13,14 +13,16 @@ from src.automl_utils import (
     bq_dataset_id,
     bq_dataset_uri,
     bq_source_uri,
-    bq_table_id,
     eval_artifact_path,
     load_run_artifact,
     metrics_artifact_path,
+    normalize_predictions_table,
     save_run_artifact,
 )
 from src.config import add_config_arguments, load_config_from_args
 from src.metrics import compute_metrics, print_metrics_report
+from src.prediction_logging import log_batch_predictions
+from src.predictions import prediction_column, predicted_positive_expr
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,49 +47,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Reuse the latest batch prediction table in the dataset instead of running a new job.",
     )
-    return parser.parse_args()
-
-
-def prediction_column(schema: list[bigquery.SchemaField], target_column: str) -> str:
-    candidates = [
-        f"predicted_{target_column}",
-        f"predicted_{target_column}.bool",
-        "predicted_label",
-    ]
-    names = {field.name for field in schema}
-    for candidate in candidates:
-        if candidate in names:
-            return candidate
-    predicted = [name for name in names if name.startswith("predicted_")]
-    if len(predicted) == 1:
-        return predicted[0]
-    raise ValueError(f"Could not find prediction column in schema: {sorted(names)}")
-
-
-def predicted_positive_expr(
-    schema: list[bigquery.SchemaField],
-    predicted_col: str,
-    alias: str = "p",
-) -> str:
-    """SQL boolean expression for the model's positive-class prediction."""
-    field = next((item for item in schema if item.name == predicted_col), None)
-    if field is None:
-        raise ValueError(f"Prediction column not found in schema: {predicted_col}")
-    if field.field_type in {"BOOLEAN", "BOOL"}:
-        return f"{alias}.{predicted_col}"
-    if field.field_type == "RECORD":
-        # AutoML batch output: STRUCT<classes ARRAY<STRING>, scores ARRAY<FLOAT64>>
-        return f"""(
-          SELECT AS VALUE LOWER(class) IN ('true', '1')
-          FROM UNNEST({alias}.{predicted_col}.classes) AS class WITH OFFSET i
-          JOIN UNNEST({alias}.{predicted_col}.scores) AS score WITH OFFSET j
-            ON i = j
-          ORDER BY score DESC
-          LIMIT 1
-        )"""
-    raise ValueError(
-        f"Unsupported prediction column type for {predicted_col}: {field.field_type}"
+    parser.add_argument(
+        "--skip-log",
+        action="store_true",
+        help="Do not append results to prediction_log.",
     )
+    parser.add_argument(
+        "--force-log",
+        action="store_true",
+        help="Append to prediction_log even if this batch table was already logged.",
+    )
+    return parser.parse_args()
 
 
 def find_latest_prediction_table(
@@ -106,12 +76,6 @@ def find_latest_prediction_table(
     if not rows:
         return None
     return f"{client.project}.{dataset_id}.{rows[0].table_name}"
-
-
-def normalize_predictions_table(predictions_table: str, config: dict) -> str:
-    if predictions_table.count(".") >= 2:
-        return predictions_table
-    return bq_table_id(config, predictions_table)
 
 
 def run_batch_predict(
@@ -186,6 +150,7 @@ def main() -> None:
     client = bigquery.Client(project=project_id)
     automl = automl_config(config)
     prefix = automl.get("predictions_table_prefix", "automl_predictions")
+    job_name = f"{automl.get('display_name_prefix', 'aml-fraud')}-eval-{profile}"
 
     eval_path = eval_artifact_path(config)
     if args.skip_batch_predict:
@@ -205,7 +170,6 @@ def main() -> None:
                 )
             print(f"Reusing latest predictions table: {predictions_table}")
     else:
-        job_name = f"{automl.get('display_name_prefix', 'aml-fraud')}-eval-{profile}"
         predictions_table = run_batch_predict(model, config, job_name)
         save_run_artifact(
             eval_path,
@@ -214,6 +178,19 @@ def main() -> None:
                 "model_resource_name": model_name,
                 "predictions_table": predictions_table,
             },
+        )
+
+    if not args.skip_log:
+        log_batch_predictions(
+            client,
+            config,
+            predictions_table,
+            model_resource_name=model_name,
+            prediction_source="batch_eval",
+            model_display_name=artifact.get("model_display_name"),
+            batch_job_display_name=job_name,
+            feature_view=config["bigquery"].get("features_test_view"),
+            force=args.force_log,
         )
 
     evaluate_and_report(client, predictions_table, config, model_name)

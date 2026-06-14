@@ -1098,7 +1098,16 @@ class SyntheticAMLGenerator:
         return pd.DataFrame(rows)
 
     def beneficial_owners_df(self) -> pd.DataFrame:
-        return pd.DataFrame(self.beneficial_owners)
+        df = pd.DataFrame(self.beneficial_owners)
+        for col in (
+            "beneficial_owner_id",
+            "business_customer_id",
+            "owner_customer_id",
+            "owner_counterparty_id",
+        ):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+        return df
 
 
 def schema_column_order(schema_path: Path, *, exclude: frozenset[str] = POST_LOAD_COLUMNS) -> list[str]:
@@ -1132,7 +1141,7 @@ def write_dimension_tables(generator: SyntheticAMLGenerator, output_dir: Path) -
     paths: dict[str, Path] = {}
     for filename, frame in tables.items():
         path = output_dir / filename
-        frame.to_csv(path, index=False)
+        frame.to_csv(path, index=False, na_rep="")
         paths[filename] = path
     return paths
 

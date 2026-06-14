@@ -214,10 +214,36 @@ python -m src.evaluate_automl
 | `features_automl` | Unions train/val/test splits with `ml_split` = `TRAIN` / `VALIDATE` / `TEST` |
 | `train_automl.py` | Creates TabularDataset from BigQuery, runs AutoML Tabular (target: `is_fraud`, objective: `maximize-au-prc`) |
 | `evaluate_automl.py` | Batch-predicts on `features_test`, reports precision/recall/F1 overall and by `typology` |
+| `log_predictions.py` | Backfill `prediction_log` from an existing Vertex batch output table |
 
 Excluded from training (config `automl.excluded_columns`): `transaction_id`, `timestamp`, `txn_date`, `sender_account`, `receiver_account`, `sender_account_id`, `sender_counterparty_account_id`, `receiver_account_id`, `receiver_counterparty_account_id`, `ml_split`.
 
 Run metadata is saved locally to `artifacts/automl_<profile>.json` (gitignored).
+
+### Prediction logging
+
+Batch evaluation appends a normalized audit row per transaction to `prediction_log` (or `prediction_log_dev`):
+
+| Column | Purpose |
+|--------|---------|
+| `prediction_id` | Unique log row |
+| `transaction_id` | Scored transaction |
+| `predicted_is_fraud`, `fraud_score` | Model output |
+| `actual_is_fraud` | Ground truth when available (joined from `features_eval`) |
+| `model_resource_name`, `prediction_source` | Model + channel (`batch_eval`, `batch_score`, `online`) |
+| `raw_predictions_table` | Vertex batch output table (idempotency key) |
+
+```bash
+# Logged automatically when you evaluate
+python -m src.evaluate_automl --skip-batch-predict   # re-log skipped if already logged
+
+# Backfill from the latest eval artifact or newest automl_predictions_* table
+python -m src.log_predictions
+python -m src.log_predictions --predictions-table automl_predictions_123 --force
+```
+
+**Schema:** `schemas/prediction_log.json`  
+**DDL:** `sql/logging/create_prediction_log_table.sql`
 
 ## Phase 4 — Deploy to Vertex endpoint
 
@@ -235,6 +261,26 @@ python -m src.export_metrics
 python -m src.export_metrics --profile dev
 ```
 
+## Phase 5 — Cloud Run serving (Phase 2-lite)
+
+**Spec:** [`docs/serving-spec.md`](docs/serving-spec.md)
+
+Prod-shaped online scoring: authenticated customer + payment instruction → party resolution → BQ feature SQL → Vertex → `prediction_log`.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /score` | **Primary API** — `customer_id`, `sender_account_id`, amount, `receiver` object; resolver builds canonical v2 txn |
+| `POST /validate` | **Dev parity only** — full raw v2 JSON with pre-resolved IDs; compare vs `features_training_dev` |
+| `GET /health` | Liveness |
+
+Build order: `party_resolver.py` + `sql/serving/score_features.sql` + parity tests, then FastAPI + Cloud Run.
+
+```bash
+# Parity check: online score_features.sql vs features_training_dev (requires BQ + ADC)
+python -m src.serving.parity_check --profile dev --transaction-id <TXN_ID>
+python -m src.serving.parity_batch --profile dev --limit 10
+```
+
 ## Next iterations
 
 - [x] BigQuery SQL feature engineering views
@@ -242,7 +288,7 @@ python -m src.export_metrics --profile dev
 - [x] Vertex AI AutoML training pipeline
 - [x] Vertex AI endpoint deployment
 - [x] Data arch v2 — separated client/counterparty dimensions, v2 transactions, feature joins
-- [ ] Reload BQ data + redeploy views + retrain AutoML on v2 schema
-- [ ] Prediction logging table
-- [ ] Cloud Run inference API with matching feature logic
+- [x] Prediction logging table (`prediction_log`)
+- [x] Dev BQ reload + views + AutoML retrain on v2 (25k profile)
+- [ ] Phase 2-lite serving API — see `docs/serving-spec.md`
 - [ ] Streamlit monitoring dashboard

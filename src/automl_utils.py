@@ -69,6 +69,12 @@ def bq_source_uri(config: dict, table_or_view: str) -> str:
     return f"bq://{bq_table_id(config, table_or_view)}"
 
 
+def normalize_predictions_table(predictions_table: str, config: dict) -> str:
+    if predictions_table.count(".") >= 2:
+        return predictions_table
+    return bq_table_id(config, predictions_table)
+
+
 def template_variables(config: dict) -> dict[str, str]:
     gcp = config["gcp"]
     bq = config["bigquery"]

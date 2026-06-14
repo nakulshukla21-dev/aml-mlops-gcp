@@ -32,6 +32,7 @@ bigquery:
   features_train_view: features_train_dev
   features_val_view: features_val_dev
   features_test_view: features_test_dev
+  prediction_log_table: prediction_log_dev
   location: US
 
 splits:
